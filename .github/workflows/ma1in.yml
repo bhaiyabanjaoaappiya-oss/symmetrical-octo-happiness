@@ -34,8 +34,9 @@ jobs:
         run: |
           Write-Host "🔧 Setting up environment..." -ForegroundColor Cyan
           $ErrorActionPreference = "Stop"
-          New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\downloads" | Out-Null
-          Set-Location "$env:USERPROFILE\downloads"
+          $dl = "$env:USERPROFILE\downloads"
+          New-Item -ItemType Directory -Force -Path $dl | Out-Null
+          Set-Location $dl
 
       - name: Download installers
         shell: pwsh
@@ -52,7 +53,7 @@ jobs:
             Invoke-WebRequest -Uri $pkg.Url -OutFile $pkg.Name
           }
 
-      - name: Install Chrome Remote Desktop host
+      - name: Install CRD host
         shell: pwsh
         run: |
           Write-Host "🧩 Installing CRD host..." -ForegroundColor Cyan
@@ -62,17 +63,34 @@ jobs:
       - name: Install Telegram, VSCode, Tor
         shell: pwsh
         run: |
-          Write-Host "💬 Installing Telegram..." -ForegroundColor Cyan
-          Start-Process .\Telegram.exe -ArgumentList "/silent" -Wait
-          Write-Host "✅ Telegram installed." -ForegroundColor Green
+          $dl = "$env:USERPROFILE\downloads"
 
-          Write-Host "📝 Installing VS Code..." -ForegroundColor Cyan
-          Start-Process .\VSCode.exe -ArgumentList "/silent" -Wait
-          Write-Host "✅ VS Code installed." -ForegroundColor Green
+          $telegram = Join-Path $dl "Telegram.exe"
+          if (Test-Path $telegram) {
+            Write-Host "💬 Installing Telegram..." -ForegroundColor Cyan
+            Start-Process $telegram -ArgumentList "/silent" -Wait
+            Write-Host "✅ Telegram installed." -ForegroundColor Green
+          } else {
+            Write-Host "❌ Telegram installer not found." -ForegroundColor Red
+          }
 
-          Write-Host "🧅 Installing Tor Browser..." -ForegroundColor Cyan
-          Start-Process .\TorBrowser.exe -ArgumentList "/silent" -Wait
-          Write-Host "✅ Tor Browser installed." -ForegroundColor Green
+          $vscode = Join-Path $dl "VSCode.exe"
+          if (Test-Path $vscode) {
+            Write-Host "📝 Installing VS Code..." -ForegroundColor Cyan
+            Start-Process $vscode -ArgumentList "/silent" -Wait
+            Write-Host "✅ VS Code installed." -ForegroundColor Green
+          } else {
+            Write-Host "❌ VS Code installer not found." -ForegroundColor Red
+          }
+
+          $tor = Join-Path $dl "TorBrowser.exe"
+          if (Test-Path $tor) {
+            Write-Host "🧅 Installing Tor Browser..." -ForegroundColor Cyan
+            Start-Process $tor -ArgumentList "/silent" -Wait
+            Write-Host "✅ Tor Browser installed." -ForegroundColor Green
+          } else {
+            Write-Host "❌ Tor Browser installer not found." -ForegroundColor Red
+          }
 
       - name: Start CRD headless host
         shell: pwsh
@@ -91,8 +109,7 @@ jobs:
 
           $redirect = "https://remotedesktop.google.com/_/oauthredirect"
 
-          # 🔍 Dynamic search for start_host.exe
-          Write-Host "Searching for start_host.exe..." -ForegroundColor Cyan
+          Write-Host "🔍 Searching for start_host.exe..." -ForegroundColor Cyan
           $startHost = Get-ChildItem -Path "C:\" -Recurse -Filter start_host.exe -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $startHost) { throw "Could not find start_host.exe after install." }
           $startHost = $startHost.FullName
