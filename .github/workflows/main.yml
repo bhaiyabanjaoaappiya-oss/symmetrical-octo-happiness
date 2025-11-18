@@ -1,0 +1,130 @@
+name: Windows CRD host
+
+on:
+  workflow_dispatch:
+    inputs:
+      CODE:
+        description: "Full headless command or just the 4/... token"
+        required: true
+      PIN:
+        description: "CRD PIN (6+ digits). Default 123456"
+        required: false
+        default: "123456"
+      RETRIES:
+        description: "Retries for start-host (default 3)"
+        required: false
+        default: "3"
+      TIME_LIMIT:
+        description: "Session time limit (1h,2h,3h,5h,6h)"
+        required: false
+        default: "1h"
+      CUSTOM_NAME:
+        description: "Custom display name for this Windows CRD host"
+        required: false
+        default: "Windows-Runner"
+
+jobs:
+  crd:
+    runs-on: windows-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Prepare environment
+        shell: pwsh
+        run: |
+          Write-Host "🔧 Setting up environment..." -ForegroundColor Cyan
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\downloads" | Out-Null
+          Set-Location "$env:USERPROFILE\downloads"
+
+      - name: Download CRD host
+        shell: pwsh
+        run: |
+          Write-Host "⬇️ Downloading Chrome Remote Desktop host..." -ForegroundColor Cyan
+          Invoke-WebRequest -Uri "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi" -OutFile "crdhost.msi"
+
+      - name: Install CRD host
+        shell: pwsh
+        run: |
+          Write-Host "🧩 Installing CRD host..." -ForegroundColor Cyan
+          Start-Process msiexec.exe -ArgumentList "/i crdhost.msi /quiet /norestart" -Wait
+          Write-Host "✅ CRD host installed." -ForegroundColor Green
+
+      - name: Start CRD headless host
+        shell: pwsh
+        env:
+          INPUT_CODE: ${{ github.event.inputs.CODE }}
+          INPUT_PIN: ${{ github.event.inputs.PIN }}
+          INPUT_RETRIES: ${{ github.event.inputs.RETRIES }}
+          INPUT_NAME: ${{ github.event.inputs.CUSTOM_NAME }}
+        run: |
+          $code    = $env:INPUT_CODE.Trim()
+          $pin     = $env:INPUT_PIN.Trim()
+          $retries = [int]$env:INPUT_RETRIES
+          $name    = $env:INPUT_NAME
+          if (-not $name) { $name = $env:COMPUTERNAME }
+          if ($pin.Length -lt 6) { throw "PIN must be at least 6 digits." }
+
+          $redirect = "https://remotedesktop.google.com/_/oauthredirect"
+
+          # Find start_host.exe
+          $possible = @(
+            "$env:ProgramFiles\Google\Chrome Remote Desktop\HostInstaller\start_host.exe",
+            "$env:ProgramFiles(x86)\Google\Chrome Remote Desktop\HostInstaller\start_host.exe"
+          )
+          $startHost = $possible | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $startHost) { throw "Could not find start_host.exe after install." }
+
+          if ($code -match '^\s*4/.+') {
+            $args = @("--code=$code", "--redirect-url=$redirect", "--name=$name", "--pin=$pin")
+          } else {
+            $tokens = $code -split '\s+'
+            $args = @()
+            foreach ($t in $tokens) {
+              if ($t -match '^--code=')          { $args += $t }
+              elseif ($t -match '^--redirect-url=') { $args += $t }
+              elseif ($t -match '^--name=')      { $args += $t }
+              elseif ($t -match '^--pin=')       { $args += $t }
+            }
+            if (-not ($args | Where-Object { $_ -match '^--name=' })) {
+              $args += "--name=$name"
+            }
+            if (-not ($args | Where-Object { $_ -match '^--pin=' })) {
+              $args += "--pin=$pin"
+            }
+          }
+
+          Write-Host "🖥️ Starting CRD host with name: $name" -ForegroundColor Cyan
+
+          $attempt = 0
+          $success = $false
+          while (-not $success -and ($attempt -lt $retries)) {
+            $attempt++
+            Write-Host "⏳ Attempt $attempt/$retries" -ForegroundColor Yellow
+            try {
+              & $startHost @args
+              Write-Host "✅ start_host executed." -ForegroundColor Green
+              $success = $true
+            } catch {
+              Write-Host "❌ Failed: $($_.Exception.Message)" -ForegroundColor Red
+              Start-Sleep -Seconds 5
+            }
+          }
+          if (-not $success) { throw "Failed to start CRD host after $retries attempts." }
+
+      - name: Keep runner alive
+        shell: pwsh
+        env:
+          INPUT_TIME_LIMIT: ${{ github.event.inputs.TIME_LIMIT }}
+        run: |
+          $limit = $env:INPUT_TIME_LIMIT
+          switch ($limit) {
+            "1h" { $seconds = 3600 }
+            "2h" { $seconds = 7200 }
+            "3h" { $seconds = 10800 }
+            "5h" { $seconds = 18000 }
+            "6h" { $seconds = 21600 }
+            default { $seconds = 3600 }
+          }
+          Write-Host "🛌 Keeping session alive for $limit ($seconds seconds)..." -ForegroundColor Cyan
+          Start-Sleep -Seconds $seconds
