@@ -45,7 +45,7 @@ jobs:
             @{ Url = "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi"; Name = "crdhost.msi" },
             @{ Url = "https://desktop.telegram.org/telegram.exe"; Name = "Telegram.exe" },
             @{ Url = "https://code.visualstudio.com/sha/download?build=stable&os=win32-x64-user"; Name = "VSCode.exe" },
-            @{ Url = "https://www.torproject.org/dist/torbrowser/14.0.1/torbrowser-install-win64-14.0.1.exe"; Name = "TorBrowser.exe" }
+            @{ Url = "https://www.torproject.org/dist/torbrowser/15.0.1/tor-browser-windows-x86_64-portable-15.0.1.exe"; Name = "TorBrowser.exe" }
           )
           foreach ($pkg in $packages) {
             Write-Host "→ $($pkg.Name)" -ForegroundColor Yellow
