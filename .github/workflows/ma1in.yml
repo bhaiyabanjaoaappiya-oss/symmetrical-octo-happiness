@@ -1,0 +1,136 @@
+name: Windows CRD host with tools
+
+on:
+  workflow_dispatch:
+    inputs:
+      CODE:
+        description: "Full headless command or just the 4/... token"
+        required: true
+      PIN:
+        description: "CRD PIN (6+ digits). Default 123456"
+        required: false
+        default: "123456"
+      RETRIES:
+        description: "Retries for start-host (default 3)"
+        required: false
+        default: "3"
+      TIME_LIMIT:
+        description: "Session time limit (1h,2h,3h,5h,6h)"
+        required: false
+        default: "1h"
+      CUSTOM_NAME:
+        description: "Custom display name for this Windows CRD host"
+        required: false
+        default: "Windows-Runner"
+
+jobs:
+  crd:
+    runs-on: windows-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Prepare environment
+        shell: pwsh
+        run: |
+          Write-Host "🔧 Setting up environment..." -ForegroundColor Cyan
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\downloads" | Out-Null
+          Set-Location "$env:USERPROFILE\downloads"
+
+      - name: Download installers
+        shell: pwsh
+        run: |
+          Write-Host "⬇️ Downloading packages..." -ForegroundColor Cyan
+          $packages = @(
+            @{ Url = "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi"; Name = "crdhost.msi" },
+            @{ Url = "https://desktop.telegram.org/telegram.exe"; Name = "Telegram.exe" },
+            @{ Url = "https://code.visualstudio.com/sha/download?build=stable&os=win32-x64-user"; Name = "VSCode.exe" },
+            @{ Url = "https://www.torproject.org/dist/torbrowser/14.0.1/torbrowser-install-win64-14.0.1.exe"; Name = "TorBrowser.exe" }
+          )
+          foreach ($pkg in $packages) {
+            Write-Host "→ $($pkg.Name)" -ForegroundColor Yellow
+            Invoke-WebRequest -Uri $pkg.Url -OutFile $pkg.Name
+          }
+
+      - name: Install Chrome Remote Desktop host
+        shell: pwsh
+        run: |
+          Write-Host "🧩 Installing CRD host..." -ForegroundColor Cyan
+          Start-Process msiexec.exe -ArgumentList "/i crdhost.msi /quiet /norestart" -Wait
+          Write-Host "✅ CRD host installed." -ForegroundColor Green
+
+      - name: Install Telegram, VSCode, Tor
+        shell: pwsh
+        run: |
+          Write-Host "💬 Installing Telegram..." -ForegroundColor Cyan
+          Start-Process .\Telegram.exe -ArgumentList "/silent" -Wait
+          Write-Host "✅ Telegram installed." -ForegroundColor Green
+
+          Write-Host "📝 Installing VS Code..." -ForegroundColor Cyan
+          Start-Process .\VSCode.exe -ArgumentList "/silent" -Wait
+          Write-Host "✅ VS Code installed." -ForegroundColor Green
+
+          Write-Host "🧅 Installing Tor Browser..." -ForegroundColor Cyan
+          Start-Process .\TorBrowser.exe -ArgumentList "/silent" -Wait
+          Write-Host "✅ Tor Browser installed." -ForegroundColor Green
+
+      - name: Start CRD headless host
+        shell: pwsh
+        env:
+          INPUT_CODE: ${{ github.event.inputs.CODE }}
+          INPUT_PIN: ${{ github.event.inputs.PIN }}
+          INPUT_RETRIES: ${{ github.event.inputs.RETRIES }}
+          INPUT_NAME: ${{ github.event.inputs.CUSTOM_NAME }}
+        run: |
+          $code    = $env:INPUT_CODE.Trim()
+          $pin     = $env:INPUT_PIN.Trim()
+          $retries = [int]$env:INPUT_RETRIES
+          $name    = $env:INPUT_NAME
+          if (-not $name) { $name = $env:COMPUTERNAME }
+          if ($pin.Length -lt 6) { throw "PIN must be at least 6 digits." }
+
+          $redirect = "https://remotedesktop.google.com/_/oauthredirect"
+
+          # 🔍 Dynamic search for start_host.exe
+          Write-Host "Searching for start_host.exe..." -ForegroundColor Cyan
+          $startHost = Get-ChildItem -Path "C:\" -Recurse -Filter start_host.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $startHost) { throw "Could not find start_host.exe after install." }
+          $startHost = $startHost.FullName
+          Write-Host "✅ Found: $startHost" -ForegroundColor Green
+
+          $args = @("--code=$code", "--redirect-url=$redirect", "--name=$name", "--pin=$pin")
+
+          Write-Host "🖥️ Starting CRD host with name: $name" -ForegroundColor Cyan
+
+          $attempt = 0
+          $success = $false
+          while (-not $success -and ($attempt -lt $retries)) {
+            $attempt++
+            Write-Host "⏳ Attempt $attempt/$retries" -ForegroundColor Yellow
+            try {
+              & $startHost @args
+              Write-Host "✅ start_host executed." -ForegroundColor Green
+              $success = $true
+            } catch {
+              Write-Host "❌ Failed: $($_.Exception.Message)" -ForegroundColor Red
+              Start-Sleep -Seconds 5
+            }
+          }
+          if (-not $success) { throw "Failed to start CRD host after $retries attempts." }
+
+      - name: Keep runner alive
+        shell: pwsh
+        env:
+          INPUT_TIME_LIMIT: ${{ github.event.inputs.TIME_LIMIT }}
+        run: |
+          $limit = $env:INPUT_TIME_LIMIT
+          switch ($limit) {
+            "1h" { $seconds = 3600 }
+            "2h" { $seconds = 7200 }
+            "3h" { $seconds = 10800 }
+            "5h" { $seconds = 18000 }
+            "6h" { $seconds = 21600 }
+            default { $seconds = 3600 }
+          }
+          Write-Host "🛌 Keeping session alive for $limit ($seconds seconds)..." -ForegroundColor Cyan
+          Start-Sleep -Seconds $seconds
